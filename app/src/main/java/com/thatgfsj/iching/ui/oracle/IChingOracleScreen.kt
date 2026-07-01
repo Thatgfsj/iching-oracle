@@ -9,6 +9,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -56,7 +57,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.thatgfsj.iching.data.Hexagram
 import kotlinx.coroutines.delay
-import kotlin.math.absoluteValue
 import kotlin.random.Random
 
 /**
@@ -65,12 +65,11 @@ import kotlin.random.Random
  * Three meaningful states, all rendered in one screen:
  *  - [OracleUiState.Initial]  → home page: 64-gua word cloud +
  *    "八卦" title + "点击抽取" button.
- *  - [OracleUiState.Drawing]  → six lines fade in from the bottom
- *    one by one (≤ 3 s).
+ *  - [OracleUiState.Drawing]  → six lines + name + judgment + image
+ *    fade in from the bottom one by one (≤ 3 s).
  *  - [OracleUiState.Loaded]  → full hexagram card with two
- *    buttons: "再抽一签" and "问 AI". The Ask-AI button opens a
- *    confirmation dialog and, on confirm, fires an ACTION_SEND
- *    intent routed at the DeepSeek app.
+ *    buttons: "再抽一签" and "问 AI". The bottom button bar slides
+ *    up so the card-to-loaded transition isn't an abrupt swap.
  */
 @Composable
 fun IChingOracleScreen(
@@ -216,55 +215,63 @@ private fun HexagramWordCloud(names: List<String>) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Drawing state: six lines fade in from the bottom                   */
+/*  Drawing state: hexagram card reveals piece by piece               */
 /* ------------------------------------------------------------------ */
 
-@Composable
-private fun DrawingView(hexagram: Hexagram) {
-    // Drive visibility per-line on a staggered schedule so the
-    // bottom line appears first and the top line appears last.
-    val lineCount = hexagram.lines.size
-    val totalMs = 2_200L  // must match ViewModel DRAW_ANIMATION_MS
-    val perLineMs = totalMs / lineCount  // ≈366ms per line
-
-    var visibleCount by remember(hexagram.id) { mutableStateOf(0) }
-    LaunchedEffect(hexagram.id) {
-        for (i in 1..lineCount) {
-            visibleCount = i
-            delay(perLineMs)
-        }
-    }
-
-    Column(
-        modifier = Modifier.padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        val linesTopDown = hexagram.lines.sortedByDescending { it.position }
-        linesTopDown.forEachIndexed { idx, line ->
-            // idx 0 is the top line (position 6), which is the last
-            // to appear. line.position 1 is bottom = first to appear.
-            // visibleCount counts from bottom up, so map:
-            // visible threshold for this top-down row = lineCount - idx
-            val threshold = lineCount - idx
-            AnimatedVisibility(
-                visible = visibleCount >= threshold,
-                enter = fadeIn(animationSpec = tween(durationMillis = 200)),
-                exit = fadeOut(animationSpec = tween(durationMillis = 100)),
-            ) {
-                Text(
-                    text = line.glyph,
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 22.sp,
-                    color = MaterialTheme.colorScheme.onBackground,
-                )
-            }
-        }
+/**
+ * Stages of the hexagram reveal. The values are ordered to match
+ * the timing schedule in [DrawingView] — bumping [linesRevealed]
+ * advances the animation, then the named flags flip in sequence.
+ */
+private data class RevealState(
+    val linesRevealed: Int = 0,   // 0..6
+    val nameRevealed: Boolean = false,
+    val judgmentRevealed: Boolean = false,
+    val imageRevealed: Boolean = false,
+) {
+    companion object {
+        val FullyRevealed = RevealState(
+            linesRevealed = 6,
+            nameRevealed = true,
+            judgmentRevealed = true,
+            imageRevealed = true,
+        )
     }
 }
 
+@Composable
+private fun DrawingView(hexagram: Hexagram) {
+    var reveal by remember(hexagram.id) { mutableStateOf(RevealState()) }
+
+    LaunchedEffect(hexagram.id) {
+        // Six lines: bottom → top, ~250ms apart (6 × 250 = 1500ms).
+        for (i in 1..6) {
+            reveal = reveal.copy(linesRevealed = i)
+            delay(LINE_STEP_MS)
+        }
+        // Then name, judgment, image — each gets a short reveal pause
+        // so the eye can take it in before the next section appears.
+        reveal = reveal.copy(nameRevealed = true)
+        delay(NAME_STEP_MS)
+        reveal = reveal.copy(judgmentRevealed = true)
+        delay(JUDGMENT_STEP_MS)
+        reveal = reveal.copy(imageRevealed = true)
+    }
+
+    HexagramCardColumn(
+        hexagram = hexagram,
+        reveal = reveal,
+    )
+}
+
+private const val LINE_STEP_MS: Long = 250L
+private const val NAME_STEP_MS: Long = 220L
+private const val JUDGMENT_STEP_MS: Long = 280L
+// IMAGE reveal triggers the Loaded transition in the ViewModel —
+// no delay needed here.
+
 /* ------------------------------------------------------------------ */
-/*  Loaded state: hexagram card + dual action buttons                 */
+/*  Loaded state: card fully revealed + slide-in bottom bar           */
 /* ------------------------------------------------------------------ */
 
 @Composable
@@ -275,6 +282,16 @@ private fun LoadedView(
     onAskAi: (Hexagram) -> Unit,
 ) {
     var showAskAiDialog by remember(fadeKey) { mutableStateOf(false) }
+    var showBottomBar by remember(fadeKey) { mutableStateOf(false) }
+
+    // Slide the bottom bar in shortly after we land on Loaded. The
+    // card itself is already on screen (it's the same composable as
+    // in Drawing, just fully revealed), so the only "new" element
+    // here is the action row — it slides up from below.
+    LaunchedEffect(fadeKey) {
+        delay(120L)
+        showBottomBar = true
+    }
 
     if (showAskAiDialog) {
         AskAiDialog(
@@ -294,55 +311,74 @@ private fun LoadedView(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(24.dp),
     ) {
-        HexagramCard(
+        HexagramCardColumn(
             hexagram = hexagram,
+            reveal = RevealState.FullyRevealed,
             onClick = onDraw,
         )
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        AnimatedVisibility(
+            visible = showBottomBar,
+            enter = slideInVertically(animationSpec = tween(360)) { it } +
+                fadeIn(animationSpec = tween(360)),
         ) {
-            OutlinedButton(
-                onClick = onDraw,
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.weight(1f),
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Text("再抽一签", fontFamily = FontFamily.Serif)
-            }
-            Button(
-                onClick = { showAskAiDialog = true },
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                ),
-                modifier = Modifier.weight(1f),
-            ) {
-                Text("✨  问 AI", fontFamily = FontFamily.Serif)
+                OutlinedButton(
+                    onClick = onDraw,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text("再抽一签", fontFamily = FontFamily.Serif)
+                }
+                Button(
+                    onClick = { showAskAiDialog = true },
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                    ),
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text("✨  问 AI", fontFamily = FontFamily.Serif)
+                }
             }
         }
         Spacer(modifier = Modifier.height(16.dp))
     }
 }
 
+/* ------------------------------------------------------------------ */
+/*  Hexagram card content (shared between Drawing and Loaded)         */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Card layout shared by [DrawingView] and [LoadedView]. The card
+ * itself is a tap target in [LoadedView]; during [DrawingView] the
+ * [onClick] is null and tapping does nothing.
+ */
 @Composable
-private fun HexagramCard(
+private fun HexagramCardColumn(
     hexagram: Hexagram,
-    onClick: () -> Unit,
+    reveal: RevealState,
+    onClick: (() -> Unit)? = null,
 ) {
-    // The card itself is the tap target — we wrap the whole thing
-    // in a clickable Surface so tapping anywhere on the card (the
-    // lines, the name, the judgment) triggers a redraw. The
-    // button below is the explicit, discoverable affordance.
     val interactionSource = remember { MutableInteractionSource() }
+    val cardModifier = Modifier
+        .fillMaxWidth()
+        .clip(RoundedCornerShape(16.dp))
+        .let { m ->
+            if (onClick != null) {
+                m.clickable(
+                    interactionSource = interactionSource,
+                    indication = null,
+                    onClick = onClick,
+                )
+            } else m
+        }
+
     Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .clickable(
-                interactionSource = interactionSource,
-                indication = null,
-                onClick = onClick,
-            ),
+        modifier = cardModifier,
         color = MaterialTheme.colorScheme.surface,
         tonalElevation = 1.dp,
         shape = RoundedCornerShape(16.dp),
@@ -352,39 +388,48 @@ private fun HexagramCard(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(20.dp),
         ) {
-            HexagramLines(hexagram = hexagram)
-            HexagramHeader(hexagram = hexagram)
-            JudgmentAndImage(hexagram = hexagram)
+            HexagramLines(hexagram = hexagram, linesRevealed = reveal.linesRevealed)
+            AnimatedVisibility(
+                visible = reveal.nameRevealed,
+                enter = fadeIn(animationSpec = tween(360)),
+            ) {
+                HexagramHeader(hexagram = hexagram)
+            }
+            JudgmentAndImage(
+                hexagram = hexagram,
+                judgmentVisible = reveal.judgmentRevealed,
+                imageVisible = reveal.imageRevealed,
+            )
         }
     }
 }
 
 /**
  * The six lines, painted top-down visually (line 6 on top, line 1
- * at the bottom). We sort the `lines` list from highest position to
- * lowest before rendering so iterating top-to-bottom in the
- * Composable matches the visual top-to-bottom order.
- *
- * No animation here: the [OracleUiState.Drawing] phase already
- * animates the six lines in sequence; by the time we reach
- * [OracleUiState.Loaded] the lines are fully visible, so we just
- * render them statically. Re-animating on entry to Loaded would
- * cause a flicker.
+ * at the bottom). Each line is wrapped in [AnimatedVisibility]
+ * gated on `line.position <= linesRevealed`, so lines fade in
+ * bottom-to-top as the parent reveal state advances.
  */
 @Composable
-private fun HexagramLines(hexagram: Hexagram) {
+private fun HexagramLines(hexagram: Hexagram, linesRevealed: Int) {
     val linesTopDown = hexagram.lines.sortedByDescending { it.position }
     Column(
         verticalArrangement = Arrangement.spacedBy(8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         linesTopDown.forEach { line ->
-            Text(
-                text = line.glyph,
-                fontFamily = FontFamily.Monospace,
-                fontSize = 22.sp,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
+            AnimatedVisibility(
+                visible = line.position <= linesRevealed,
+                enter = fadeIn(animationSpec = tween(220)),
+                exit = fadeOut(animationSpec = tween(120)),
+            ) {
+                Text(
+                    text = line.glyph,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 22.sp,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+            }
         }
     }
 }
@@ -425,44 +470,63 @@ private fun HexagramHeader(hexagram: Hexagram) {
 }
 
 @Composable
-private fun JudgmentAndImage(hexagram: Hexagram) {
+private fun JudgmentAndImage(
+    hexagram: Hexagram,
+    judgmentVisible: Boolean,
+    imageVisible: Boolean,
+) {
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+        AnimatedVisibility(
+            visible = judgmentVisible,
+            enter = fadeIn(animationSpec = tween(360)),
         ) {
-            SectionLabel("卦辞")
-            Text(
-                text = hexagram.judgment,
-                fontFamily = FontFamily.Serif,
-                fontSize = 15.sp,
-                textAlign = TextAlign.Center,
-                color = MaterialTheme.colorScheme.onSurface,
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                SectionLabel("卦辞")
+                Text(
+                    text = hexagram.judgment,
+                    fontFamily = FontFamily.Serif,
+                    fontSize = 15.sp,
+                    textAlign = TextAlign.Center,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+            }
+        }
+        AnimatedVisibility(
+            visible = judgmentVisible,
+            enter = fadeIn(animationSpec = tween(360)),
+        ) {
+            Spacer(modifier = Modifier.height(4.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
             )
         }
-        Spacer(modifier = Modifier.height(4.dp))
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(1.dp)
-                .background(MaterialTheme.colorScheme.surfaceVariant),
-        )
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+        AnimatedVisibility(
+            visible = imageVisible,
+            enter = fadeIn(animationSpec = tween(360)),
         ) {
-            SectionLabel("象传")
-            Text(
-                text = hexagram.image,
-                fontFamily = FontFamily.Serif,
-                fontSize = 14.sp,
-                textAlign = TextAlign.Center,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                SectionLabel("象传")
+                Text(
+                    text = hexagram.image,
+                    fontFamily = FontFamily.Serif,
+                    fontSize = 14.sp,
+                    textAlign = TextAlign.Center,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }

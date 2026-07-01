@@ -36,11 +36,16 @@ sealed interface OracleUiState {
 }
 
 /**
- * Total duration of the draw animation (six lines appearing in
- * sequence). Tuned to land well under three seconds per the user's
- * "3秒之内解决" requirement; tweak in one place if needed.
+ * Total duration of the draw animation. Must match the schedule
+ * in `IChingOracleScreen.DrawingView`:
+ *   6 lines × 250 ms = 1500 ms (lines)
+ *   + 220 ms (gap before name)
+ *   + 280 ms (gap before judgment)
+ *   + ~360 ms (image fade-in tween)
+ *   ≈ 2.4 s total. We round up to 2500 ms so the image fade-in
+ * finishes before we swap to Loaded, no abrupt cut.
  */
-private const val DRAW_ANIMATION_MS: Long = 2_200L
+private const val DRAW_ANIMATION_MS: Long = 2_500L
 
 class IChingViewModel(application: Application) : AndroidViewModel(application) {
 
