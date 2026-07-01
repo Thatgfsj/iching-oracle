@@ -27,7 +27,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -302,11 +301,12 @@ private const val JUDGMENT_STEP_MS: Long = 280L
 // no delay needed here.
 
 /**
- * Shared layout for the Drawing and Loaded states. Both states
- * render the exact same outer Column (verticalScroll + 32dp top
- * padding) so the hexagram card stays in the same screen position
- * across the Drawing→Loaded transition; only the [reveal] state
- * and the bottom action bar's visibility change.
+ * Shared layout for the Drawing and Loaded states. The hexagram
+ * card is always vertically centered on screen via an inner
+ * [Box.Center]; the action row is pinned to the bottom edge via
+ * [Box.align]. This means the card never shifts position — the
+ * only thing that changes between Drawing and Loaded is the
+ * bottom bar's visibility (and the card's internal reveal state).
  */
 @Composable
 private fun HexagramScreenLayout(
@@ -328,48 +328,58 @@ private fun HexagramScreenLayout(
         )
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 24.dp, vertical = 32.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(24.dp),
-    ) {
-        HexagramCardColumn(
-            hexagram = hexagram,
-            reveal = reveal,
-            onClick = if (bottomBarVisible) onDraw else null,
-        )
-        AnimatedVisibility(
-            visible = bottomBarVisible,
-            enter = slideInVertically(animationSpec = tween(220)) { it } +
-                fadeIn(animationSpec = tween(220)),
+    Box(modifier = Modifier.fillMaxSize()) {
+        // Card always centered, identical position in Drawing and Loaded.
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center,
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            HexagramCardColumn(
+                hexagram = hexagram,
+                reveal = reveal,
+                onClick = if (bottomBarVisible) onDraw else null,
+            )
+        }
+
+        // Action row pinned to the bottom. Slides up from below the
+        // screen edge once the draw animation has settled; the card
+        // above is unaffected by its presence.
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp)
+                .padding(bottom = 24.dp),
+        ) {
+            AnimatedVisibility(
+                visible = bottomBarVisible,
+                enter = slideInVertically(animationSpec = tween(220)) { it } +
+                    fadeIn(animationSpec = tween(220)),
             ) {
-                OutlinedButton(
-                    onClick = onDraw,
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.weight(1f),
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    Text("再算一卦", fontFamily = FontFamily.Serif)
-                }
-                Button(
-                    onClick = { showAskAiDialog = true },
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primary,
-                    ),
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text("✨  问 AI", fontFamily = FontFamily.Serif)
+                    OutlinedButton(
+                        onClick = onDraw,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text("再算一卦", fontFamily = FontFamily.Serif)
+                    }
+                    Button(
+                        onClick = { showAskAiDialog = true },
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                        ),
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text("✨  问 AI", fontFamily = FontFamily.Serif)
+                    }
                 }
             }
         }
-        Spacer(modifier = Modifier.height(16.dp))
     }
 }
 
