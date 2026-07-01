@@ -4,6 +4,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
@@ -297,22 +298,27 @@ private data class RevealState(
 private const val LINE_STEP_MS: Long = 240L
 private const val NAME_STEP_MS: Long = 240L
 private const val JUDGMENT_STEP_MS: Long = 280L
+/** Per-button fade duration once the draw animation has finished. */
+private const val BUTTON_FADE_MS: Int = 180
 // IMAGE reveal triggers the Loaded transition in the ViewModel —
 // no delay needed here.
 
 /**
  * Shared layout for the Drawing and Loaded states. The hexagram
  * card and the action row live in the same Column, centered on
- * screen as one unit. This keeps the buttons right under the card
- * (the v1.0.5 feel) while still giving the page a centered
- * composition. When the buttons fade in the card shifts up by
- * roughly half the button row height — a small, smooth transition.
+ * screen as one unit. The buttons are always rendered; their
+ * visibility is controlled by per-button alpha so the column
+ * height never changes — the card never shifts when the buttons
+ * appear. Anti-mistap: when a button's alpha is below
+ * [BUTTON_TAP_THRESHOLD] its onClick is a no-op so partial-fade
+ * taps don't fire.
  */
 @Composable
 private fun HexagramScreenLayout(
     hexagram: Hexagram,
     reveal: RevealState,
-    bottomBarVisible: Boolean,
+    drawButtonAlpha: Float,
+    askAiButtonAlpha: Float,
     onDraw: () -> Unit,
     onAskAi: (Hexagram) -> Unit = {},
 ) {
@@ -342,39 +348,43 @@ private fun HexagramScreenLayout(
             HexagramCardColumn(
                 hexagram = hexagram,
                 reveal = reveal,
-                onClick = if (bottomBarVisible) onDraw else null,
+                onClick = if (drawButtonAlpha > BUTTON_TAP_THRESHOLD) onDraw else null,
             )
-            AnimatedVisibility(
-                visible = bottomBarVisible,
-                enter = slideInVertically(animationSpec = tween(180)) { it } +
-                    fadeIn(animationSpec = tween(180)),
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                OutlinedButton(
+                    onClick = if (drawButtonAlpha > BUTTON_TAP_THRESHOLD) onDraw else ({ -> }),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .graphicsLayer { alpha = drawButtonAlpha },
                 ) {
-                    OutlinedButton(
-                        onClick = onDraw,
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Text("再算一卦", fontFamily = FontFamily.Serif)
-                    }
-                    Button(
-                        onClick = { showAskAiDialog = true },
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.primary,
-                        ),
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Text("✨  问 AI", fontFamily = FontFamily.Serif)
-                    }
+                    Text("再算一卦", fontFamily = FontFamily.Serif)
+                }
+                Button(
+                    onClick = if (askAiButtonAlpha > BUTTON_TAP_THRESHOLD) {
+                        { showAskAiDialog = true }
+                    } else ({ -> }),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                    ),
+                    modifier = Modifier
+                        .weight(1f)
+                        .graphicsLayer { alpha = askAiButtonAlpha },
+                ) {
+                    Text("✨  问 AI", fontFamily = FontFamily.Serif)
                 }
             }
         }
     }
 }
+
+/** Below this alpha the button is treated as not-yet-interactive
+ *  — taps during the fade-in don't fire. */
+private const val BUTTON_TAP_THRESHOLD: Float = 0.5f
 
 @Composable
 private fun DrawingView(hexagram: Hexagram, onDraw: () -> Unit) {
@@ -398,13 +408,14 @@ private fun DrawingView(hexagram: Hexagram, onDraw: () -> Unit) {
     HexagramScreenLayout(
         hexagram = hexagram,
         reveal = reveal,
-        bottomBarVisible = false,
+        drawButtonAlpha = 0f,
+        askAiButtonAlpha = 0f,
         onDraw = onDraw,
     )
 }
 
 /* ------------------------------------------------------------------ */
-/*  Loaded state: card fully revealed + slide-in bottom bar           */
+/*  Loaded state: card fully revealed + sequenced button fade-in      */
 /* ------------------------------------------------------------------ */
 
 @Composable
@@ -414,20 +425,37 @@ private fun LoadedView(
     onDraw: () -> Unit,
     onAskAi: (Hexagram) -> Unit,
 ) {
-    var showBottomBar by remember(fadeKey) { mutableStateOf(false) }
+    // Per-button triggers — flipped true with the line-step delay
+    // between them so the reveal feels like the 7th and 8th "lines"
+    // of the animation, not a separate post-animation step.
+    var showDraw by remember(fadeKey) { mutableStateOf(false) }
+    var showAskAi by remember(fadeKey) { mutableStateOf(false) }
 
-    // No delay — buttons fade in the same instant the ViewModel
-    // hands us the Loaded state, i.e. right after the draw
-    // animation finishes. The 180 ms tween on AnimatedVisibility
-    // handles the easing.
     LaunchedEffect(fadeKey) {
-        showBottomBar = true
+        // Both buttons start fading in the moment Loaded lands.
+        // The draw-button goes first; the ask-AI button follows
+        // one line-step later.
+        showDraw = true
+        delay(LINE_STEP_MS)
+        showAskAi = true
     }
+
+    val drawAlpha by animateFloatAsState(
+        targetValue = if (showDraw) 1f else 0f,
+        animationSpec = tween(durationMillis = BUTTON_FADE_MS),
+        label = "draw-button-alpha",
+    )
+    val askAiAlpha by animateFloatAsState(
+        targetValue = if (showAskAi) 1f else 0f,
+        animationSpec = tween(durationMillis = BUTTON_FADE_MS),
+        label = "ask-ai-button-alpha",
+    )
 
     HexagramScreenLayout(
         hexagram = hexagram,
         reveal = RevealState.FullyRevealed,
-        bottomBarVisible = showBottomBar,
+        drawButtonAlpha = drawAlpha,
+        askAiButtonAlpha = askAiAlpha,
         onDraw = onDraw,
         onAskAi = onAskAi,
     )
