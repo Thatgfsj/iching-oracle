@@ -38,14 +38,14 @@ sealed interface OracleUiState {
 /**
  * Total duration of the draw animation. Must match the schedule
  * in `IChingOracleScreen.DrawingView`:
- *   6 lines × 250 ms = 1500 ms (lines)
- *   + 220 ms (gap before name)
+ *   6 lines × 240 ms = 1440 ms (lines)
+ *   + 240 ms (gap before name)
  *   + 280 ms (gap before judgment)
  *   + ~360 ms (image fade-in tween)
- *   ≈ 2.4 s total. We round up to 2500 ms so the image fade-in
+ *   ≈ 2.9 s total. We round up to 3100 ms so the image fade-in
  * finishes before we swap to Loaded, no abrupt cut.
  */
-private const val DRAW_ANIMATION_MS: Long = 2_500L
+private const val DRAW_ANIMATION_MS: Long = 3_100L
 
 class IChingViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -54,33 +54,71 @@ class IChingViewModel(application: Application) : AndroidViewModel(application) 
     private val _state = MutableStateFlow<OracleUiState>(OracleUiState.Initial)
     val state: StateFlow<OracleUiState> = _state.asStateFlow()
 
+    /**
+     * A pending hexagram awaiting the user's confirmation to redraw.
+     * Non-null means the redraw-confirm dialog should be visible.
+     * Held separately from [state] so the main screen content stays
+     * on the previous Loaded hexagram (no flicker) while the dialog
+     * is up.
+     */
+    private val _pendingRedraw = MutableStateFlow<Hexagram?>(null)
+    val pendingRedraw: StateFlow<Hexagram?> = _pendingRedraw.asStateFlow()
+
     /** All 64 hexagram names for the home-screen word cloud. */
     val allHexagramNames: List<String> = repository.allNames()
 
     private var fadeCounter = 0
 
     /**
-     * Trigger a new draw. Picks the next hexagram immediately and
-     * transitions to [OracleUiState.Drawing]; after a short delay
-     * (so the UI can animate the six lines appearing in sequence)
-     * it transitions to [OracleUiState.Loaded].
-     *
-     * Safe to call from any thread; state mutation is funneled
-     * through the StateFlow which Compose reads on the main thread.
+     * Number of draws the user has initiated in this app process.
+     * Reset on cold start. The first draw skips the confirm
+     * dialog; every subsequent draw requires confirmation.
+     */
+    private var sessionDrawCount = 0
+
+    /**
+     * Trigger a new draw. On the first call in this session it
+     * goes straight into the animation; on subsequent calls it
+     * parks the picked hexagram in [pendingRedraw] and waits for
+     * the user to confirm via [confirmRedraw] / [cancelRedraw].
      */
     fun draw() {
         viewModelScope.launch {
             try {
                 val hex = repository.drawRandom()
-                _state.value = OracleUiState.Drawing(hex)
-                delay(DRAW_ANIMATION_MS)
-                fadeCounter += 1
-                _state.value = OracleUiState.Loaded(hex, fadeCounter)
+                sessionDrawCount += 1
+                if (sessionDrawCount == 1) {
+                    runDrawAnimation(hex)
+                } else {
+                    // Park the new hexagram; the UI will show the
+                    // confirm dialog while we keep the previous
+                    // Loaded state intact underneath.
+                    _pendingRedraw.value = hex
+                }
             } catch (t: Throwable) {
                 _state.value = OracleUiState.Error(
                     t.message ?: "加载卦象数据失败"
                 )
             }
         }
+    }
+
+    /** User confirmed the redraw — animate the parked hexagram in. */
+    fun confirmRedraw() {
+        val pending = _pendingRedraw.value ?: return
+        _pendingRedraw.value = null
+        viewModelScope.launch { runDrawAnimation(pending) }
+    }
+
+    /** User backed out of the redraw — drop the parked hexagram. */
+    fun cancelRedraw() {
+        _pendingRedraw.value = null
+    }
+
+    private suspend fun runDrawAnimation(hex: Hexagram) {
+        _state.value = OracleUiState.Drawing(hex)
+        delay(DRAW_ANIMATION_MS)
+        fadeCounter += 1
+        _state.value = OracleUiState.Loaded(hex, fadeCounter)
     }
 }

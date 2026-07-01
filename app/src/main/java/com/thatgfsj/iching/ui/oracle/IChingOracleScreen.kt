@@ -9,6 +9,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
 import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -77,7 +78,18 @@ fun IChingOracleScreen(
     viewModel: IChingViewModel = viewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val pendingRedraw by viewModel.pendingRedraw.collectAsStateWithLifecycle()
     val context = LocalContext.current
+
+    // Repeat-draw reminder. Shown above whatever state is on
+    // screen (typically the previous Loaded hexagram), so the
+    // user can still see the卦 they already drew.
+    if (pendingRedraw != null) {
+        RedrawConfirmDialog(
+            onCancel = viewModel::cancelRedraw,
+            onConfirm = viewModel::confirmRedraw,
+        )
+    }
 
     Surface(
         modifier = modifier.fillMaxSize(),
@@ -140,6 +152,13 @@ private fun HomePage(
                 fontSize = 14.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 letterSpacing = 4.sp,
+            )
+            Spacer(Modifier.height(10.dp))
+            Text(
+                text = "请在心中思考你想问的问题",
+                fontFamily = FontFamily.Serif,
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
             )
             Spacer(Modifier.height(56.dp))
             Button(
@@ -264,8 +283,8 @@ private fun DrawingView(hexagram: Hexagram) {
     )
 }
 
-private const val LINE_STEP_MS: Long = 250L
-private const val NAME_STEP_MS: Long = 220L
+private const val LINE_STEP_MS: Long = 240L
+private const val NAME_STEP_MS: Long = 240L
 private const val JUDGMENT_STEP_MS: Long = 280L
 // IMAGE reveal triggers the Loaded transition in the ViewModel —
 // no delay needed here.
@@ -391,7 +410,8 @@ private fun HexagramCardColumn(
             HexagramLines(hexagram = hexagram, linesRevealed = reveal.linesRevealed)
             AnimatedVisibility(
                 visible = reveal.nameRevealed,
-                enter = fadeIn(animationSpec = tween(360)),
+                enter = fadeIn(animationSpec = tween(360)) +
+                    scaleIn(initialScale = 0.96f, animationSpec = tween(360)),
             ) {
                 HexagramHeader(hexagram = hexagram)
             }
@@ -420,7 +440,8 @@ private fun HexagramLines(hexagram: Hexagram, linesRevealed: Int) {
         linesTopDown.forEach { line ->
             AnimatedVisibility(
                 visible = line.position <= linesRevealed,
-                enter = fadeIn(animationSpec = tween(220)),
+                enter = fadeIn(animationSpec = tween(220)) +
+                    scaleIn(initialScale = 0.94f, animationSpec = tween(220)),
                 exit = fadeOut(animationSpec = tween(120)),
             ) {
                 Text(
@@ -482,7 +503,8 @@ private fun JudgmentAndImage(
     ) {
         AnimatedVisibility(
             visible = judgmentVisible,
-            enter = fadeIn(animationSpec = tween(360)),
+            enter = fadeIn(animationSpec = tween(360)) +
+                slideInVertically(animationSpec = tween(360)) { 12 },
         ) {
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -512,7 +534,8 @@ private fun JudgmentAndImage(
         }
         AnimatedVisibility(
             visible = imageVisible,
-            enter = fadeIn(animationSpec = tween(360)),
+            enter = fadeIn(animationSpec = tween(360)) +
+                slideInVertically(animationSpec = tween(360)) { 12 },
         ) {
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -593,6 +616,45 @@ private fun AskAiDialog(
         dismissButton = {
             TextButton(onClick = onDismiss) {
                 Text("取消", fontFamily = FontFamily.Serif)
+            }
+        },
+    )
+}
+
+/**
+ * Reminder shown on every redraw after the first in a session.
+ * Divination tradition discourages re-rolling the same question;
+ * this asks the user to confirm the new draw is for a different
+ * question.
+ */
+@Composable
+private fun RedrawConfirmDialog(
+    onCancel: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onCancel,
+        title = {
+            Text(
+                text = "提醒",
+                fontFamily = FontFamily.Serif,
+            )
+        },
+        text = {
+            Text(
+                text = "如果一件事连续两次进行测算，就会破坏其发展，导致最后的算卦结果变得很不准确。\n\n请确定你的问题是否不一致。",
+                fontFamily = FontFamily.Serif,
+                fontSize = 14.sp,
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text("是的话就继续抽", fontFamily = FontFamily.Serif)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onCancel) {
+                Text("是，取消", fontFamily = FontFamily.Serif)
             }
         },
     )
