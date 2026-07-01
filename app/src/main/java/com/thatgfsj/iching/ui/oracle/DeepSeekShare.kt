@@ -22,12 +22,12 @@ private const val DEEPSEEK_PACKAGE: String = "com.deepseek.chat"
  * and because DeepSeek's chat is primarily a Chinese product.
  */
 fun formatHexagramShareText(hexagram: Hexagram): String = buildString {
-    appendLine("我要问的问题是：")
-    appendLine()
     appendLine("我算到了第 ${hexagram.id} 卦：${hexagram.name_zh}（${hexagram.name_pinyin} / ${hexagram.name_en}）")
     appendLine()
     appendLine("卦辞：${hexagram.judgment}")
     appendLine("象传：${hexagram.image}")
+    appendLine()
+    append("我要问的问题是：")
 }
 
 /**
