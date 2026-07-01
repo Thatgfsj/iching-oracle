@@ -95,23 +95,31 @@ fun IChingOracleScreen(
         modifier = modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.background,
     ) {
-        Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center,
-        ) {
-            when (val s = state) {
-                is OracleUiState.Initial -> HomePage(
+        when (val s = state) {
+            is OracleUiState.Initial -> Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center,
+            ) {
+                HomePage(
                     allNames = viewModel.allHexagramNames,
                     onDraw = viewModel::draw,
                 )
-                is OracleUiState.Drawing -> DrawingView(hexagram = s.hexagram)
-                is OracleUiState.Loaded -> LoadedView(
-                    hexagram = s.hexagram,
-                    fadeKey = s.fadeKey,
-                    onDraw = viewModel::draw,
-                    onAskAi = { hex -> shareToDeepSeek(context, hex) },
-                )
-                is OracleUiState.Error -> ErrorView(message = s.message, onRetry = viewModel::draw)
+            }
+            is OracleUiState.Drawing -> DrawingView(
+                hexagram = s.hexagram,
+                onDraw = viewModel::draw,
+            )
+            is OracleUiState.Loaded -> LoadedView(
+                hexagram = s.hexagram,
+                fadeKey = s.fadeKey,
+                onDraw = viewModel::draw,
+                onAskAi = { hex -> shareToDeepSeek(context, hex) },
+            )
+            is OracleUiState.Error -> Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center,
+            ) {
+                ErrorView(message = s.message, onRetry = viewModel::draw)
             }
         }
     }
@@ -287,59 +295,28 @@ private data class RevealState(
     }
 }
 
-@Composable
-private fun DrawingView(hexagram: Hexagram) {
-    var reveal by remember(hexagram.id) { mutableStateOf(RevealState()) }
-
-    LaunchedEffect(hexagram.id) {
-        // Six lines: bottom → top, ~250ms apart (6 × 250 = 1500ms).
-        for (i in 1..6) {
-            reveal = reveal.copy(linesRevealed = i)
-            delay(LINE_STEP_MS)
-        }
-        // Then name, judgment, image — each gets a short reveal pause
-        // so the eye can take it in before the next section appears.
-        reveal = reveal.copy(nameRevealed = true)
-        delay(NAME_STEP_MS)
-        reveal = reveal.copy(judgmentRevealed = true)
-        delay(JUDGMENT_STEP_MS)
-        reveal = reveal.copy(imageRevealed = true)
-    }
-
-    HexagramCardColumn(
-        hexagram = hexagram,
-        reveal = reveal,
-    )
-}
-
 private const val LINE_STEP_MS: Long = 240L
 private const val NAME_STEP_MS: Long = 240L
 private const val JUDGMENT_STEP_MS: Long = 280L
 // IMAGE reveal triggers the Loaded transition in the ViewModel —
 // no delay needed here.
 
-/* ------------------------------------------------------------------ */
-/*  Loaded state: card fully revealed + slide-in bottom bar           */
-/* ------------------------------------------------------------------ */
-
+/**
+ * Shared layout for the Drawing and Loaded states. Both states
+ * render the exact same outer Column (verticalScroll + 32dp top
+ * padding) so the hexagram card stays in the same screen position
+ * across the Drawing→Loaded transition; only the [reveal] state
+ * and the bottom action bar's visibility change.
+ */
 @Composable
-private fun LoadedView(
+private fun HexagramScreenLayout(
     hexagram: Hexagram,
-    fadeKey: Int,
+    reveal: RevealState,
+    bottomBarVisible: Boolean,
     onDraw: () -> Unit,
-    onAskAi: (Hexagram) -> Unit,
+    onAskAi: (Hexagram) -> Unit = {},
 ) {
-    var showAskAiDialog by remember(fadeKey) { mutableStateOf(false) }
-    var showBottomBar by remember(fadeKey) { mutableStateOf(false) }
-
-    // Slide the bottom bar in shortly after we land on Loaded. The
-    // card itself is already on screen (it's the same composable as
-    // in Drawing, just fully revealed), so the only "new" element
-    // here is the action row — it slides up from below.
-    LaunchedEffect(fadeKey) {
-        delay(120L)
-        showBottomBar = true
-    }
+    var showAskAiDialog by remember(hexagram.id) { mutableStateOf(false) }
 
     if (showAskAiDialog) {
         AskAiDialog(
@@ -361,13 +338,13 @@ private fun LoadedView(
     ) {
         HexagramCardColumn(
             hexagram = hexagram,
-            reveal = RevealState.FullyRevealed,
-            onClick = onDraw,
+            reveal = reveal,
+            onClick = if (bottomBarVisible) onDraw else null,
         )
         AnimatedVisibility(
-            visible = showBottomBar,
-            enter = slideInVertically(animationSpec = tween(360)) { it } +
-                fadeIn(animationSpec = tween(360)),
+            visible = bottomBarVisible,
+            enter = slideInVertically(animationSpec = tween(220)) { it } +
+                fadeIn(animationSpec = tween(220)),
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -378,7 +355,7 @@ private fun LoadedView(
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.weight(1f),
                 ) {
-                    Text("再抽一签", fontFamily = FontFamily.Serif)
+                    Text("再算一卦", fontFamily = FontFamily.Serif)
                 }
                 Button(
                     onClick = { showAskAiDialog = true },
@@ -394,6 +371,63 @@ private fun LoadedView(
         }
         Spacer(modifier = Modifier.height(16.dp))
     }
+}
+
+@Composable
+private fun DrawingView(hexagram: Hexagram, onDraw: () -> Unit) {
+    var reveal by remember(hexagram.id) { mutableStateOf(RevealState()) }
+
+    LaunchedEffect(hexagram.id) {
+        // Six lines: bottom → top, ~240ms apart (6 × 240 = 1440ms).
+        for (i in 1..6) {
+            reveal = reveal.copy(linesRevealed = i)
+            delay(LINE_STEP_MS)
+        }
+        // Then name, judgment, image — each gets a short reveal pause
+        // so the eye can take it in before the next section appears.
+        reveal = reveal.copy(nameRevealed = true)
+        delay(NAME_STEP_MS)
+        reveal = reveal.copy(judgmentRevealed = true)
+        delay(JUDGMENT_STEP_MS)
+        reveal = reveal.copy(imageRevealed = true)
+    }
+
+    HexagramScreenLayout(
+        hexagram = hexagram,
+        reveal = reveal,
+        bottomBarVisible = false,
+        onDraw = onDraw,
+    )
+}
+
+/* ------------------------------------------------------------------ */
+/*  Loaded state: card fully revealed + slide-in bottom bar           */
+/* ------------------------------------------------------------------ */
+
+@Composable
+private fun LoadedView(
+    hexagram: Hexagram,
+    fadeKey: Int,
+    onDraw: () -> Unit,
+    onAskAi: (Hexagram) -> Unit,
+) {
+    var showBottomBar by remember(fadeKey) { mutableStateOf(false) }
+
+    // Brief pause so the card's last fade-in lands first; then
+    // slide the action row in. Kept short — the user already saw
+    // ~3 s of reveal animation and shouldn't wait again.
+    LaunchedEffect(fadeKey) {
+        delay(40L)
+        showBottomBar = true
+    }
+
+    HexagramScreenLayout(
+        hexagram = hexagram,
+        reveal = RevealState.FullyRevealed,
+        bottomBarVisible = showBottomBar,
+        onDraw = onDraw,
+        onAskAi = onAskAi,
+    )
 }
 
 /* ------------------------------------------------------------------ */
