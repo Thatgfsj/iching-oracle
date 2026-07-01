@@ -780,7 +780,8 @@ private fun RedrawConfirmDialog(
  * Modal dialog shown when the user attempts to draw during the
  * 子时 (23:00–01:00). Tapping outside does nothing; the only way
  * out is the explicit "确认并退出" button, which finishes the
- * Activity.
+ * Activity. Title, body and button are all center-aligned for a
+ * more formal/ceremonial feel that suits the divination context.
  */
 @Composable
 private fun ZiHourBlockedDialog(
@@ -792,6 +793,8 @@ private fun ZiHourBlockedDialog(
             Text(
                 text = "子时不算卦",
                 fontFamily = FontFamily.Serif,
+                modifier = Modifier.fillMaxWidth(),
+                textAlign = TextAlign.Center,
             )
         },
         text = {
@@ -799,11 +802,21 @@ private fun ZiHourBlockedDialog(
                 text = "23:00 - 01:00",
                 fontFamily = FontFamily.Monospace,
                 fontSize = 14.sp,
+                modifier = Modifier.fillMaxWidth(),
+                textAlign = TextAlign.Center,
             )
         },
         confirmButton = {
-            TextButton(onClick = onConfirm) {
-                Text("确认并退出", fontFamily = FontFamily.Serif)
+            // Wrap the button in a centered Row so the lone action
+            // sits in the middle of the dialog footer instead of
+            // hugging the right edge.
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center,
+            ) {
+                TextButton(onClick = onConfirm) {
+                    Text("确认并退出", fontFamily = FontFamily.Serif)
+                }
             }
         },
     )
