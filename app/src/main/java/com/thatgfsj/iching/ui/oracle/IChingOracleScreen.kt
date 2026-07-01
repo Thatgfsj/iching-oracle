@@ -1,5 +1,6 @@
 package com.thatgfsj.iching.ui.oracle
 
+import android.app.Activity
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -79,6 +80,7 @@ fun IChingOracleScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val pendingRedraw by viewModel.pendingRedraw.collectAsStateWithLifecycle()
+    val ziHourBlocked by viewModel.ziHourBlocked.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
     // Repeat-draw reminder. Shown above whatever state is on
@@ -88,6 +90,18 @@ fun IChingOracleScreen(
         RedrawConfirmDialog(
             onCancel = viewModel::cancelRedraw,
             onConfirm = viewModel::confirmRedraw,
+        )
+    }
+
+    // Zi-hour block. Modal — no other interaction possible until
+    // the user either accepts (→ app exits) or the time window
+    // closes (we just dismiss, they can keep using the app).
+    if (ziHourBlocked) {
+        ZiHourBlockedDialog(
+            onConfirm = {
+                viewModel.acknowledgeZiHourBlock()
+                (context as? Activity)?.finish()
+            },
         )
     }
 
@@ -757,6 +771,39 @@ private fun RedrawConfirmDialog(
             // Left-side slot: 继续抽取.
             TextButton(onClick = onConfirm) {
                 Text("继续抽取", fontFamily = FontFamily.Serif)
+            }
+        },
+    )
+}
+
+/**
+ * Modal dialog shown when the user attempts to draw during the
+ * 子时 (23:00–01:00). Tapping outside does nothing; the only way
+ * out is the explicit "确认并退出" button, which finishes the
+ * Activity.
+ */
+@Composable
+private fun ZiHourBlockedDialog(
+    onConfirm: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = { /* not dismissable */ },
+        title = {
+            Text(
+                text = "子时不算卦",
+                fontFamily = FontFamily.Serif,
+            )
+        },
+        text = {
+            Text(
+                text = "23:00 - 01:00",
+                fontFamily = FontFamily.Monospace,
+                fontSize = 14.sp,
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text("确认并退出", fontFamily = FontFamily.Serif)
             }
         },
     )

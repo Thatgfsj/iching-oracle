@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import java.time.LocalTime
 
 /**
  * UI state for the I Ching oracle screen.
@@ -64,6 +65,15 @@ class IChingViewModel(application: Application) : AndroidViewModel(application) 
     private val _pendingRedraw = MutableStateFlow<Hexagram?>(null)
     val pendingRedraw: StateFlow<Hexagram?> = _pendingRedraw.asStateFlow()
 
+    /**
+     * True when the user has tried to draw during the 子时 (Zi hour,
+     * 23:00–01:00) and the block-divination dialog should be up.
+     * The dialog has a single "确认并退出" action that finishes the
+     * activity; this flag clears itself once the user confirms.
+     */
+    private val _ziHourBlocked = MutableStateFlow(false)
+    val ziHourBlocked: StateFlow<Boolean> = _ziHourBlocked.asStateFlow()
+
     /** All 64 hexagram names for the home-screen word cloud. */
     val allHexagramNames: List<String> = repository.allNames()
 
@@ -81,8 +91,17 @@ class IChingViewModel(application: Application) : AndroidViewModel(application) 
      * goes straight into the animation; on subsequent calls it
      * parks the picked hexagram in [pendingRedraw] and waits for
      * the user to confirm via [confirmRedraw] / [cancelRedraw].
+     *
+     * If the current local time falls in the 子时 (Zi hour,
+     * 23:00–01:00), the draw is refused and [ziHourBlocked] is
+     * raised instead — the UI shows the "子时不算卦" dialog and
+     * the only escape is "确认并退出".
      */
     fun draw() {
+        if (isZiHour()) {
+            _ziHourBlocked.value = true
+            return
+        }
         viewModelScope.launch {
             try {
                 val hex = repository.drawRandom()
@@ -101,6 +120,17 @@ class IChingViewModel(application: Application) : AndroidViewModel(application) 
                 )
             }
         }
+    }
+
+    /** Acknowledge the zi-hour block. The Activity is expected
+     *  to call finish() right after this. */
+    fun acknowledgeZiHourBlock() {
+        _ziHourBlocked.value = false
+    }
+
+    private fun isZiHour(): Boolean {
+        val hour = LocalTime.now().hour
+        return hour == 23 || hour == 0
     }
 
     /** User confirmed the redraw — animate the parked hexagram in. */
