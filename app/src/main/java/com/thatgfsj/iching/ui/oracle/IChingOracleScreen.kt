@@ -302,11 +302,11 @@ private const val JUDGMENT_STEP_MS: Long = 280L
 
 /**
  * Shared layout for the Drawing and Loaded states. The hexagram
- * card is always vertically centered on screen via an inner
- * [Box.Center]; the action row is pinned to the bottom edge via
- * [Box.align]. This means the card never shifts position — the
- * only thing that changes between Drawing and Loaded is the
- * bottom bar's visibility (and the card's internal reveal state).
+ * card and the action row live in the same Column, centered on
+ * screen as one unit. This keeps the buttons right under the card
+ * (the v1.0.5 feel) while still giving the page a centered
+ * composition. When the buttons fade in the card shifts up by
+ * roughly half the button row height — a small, smooth transition.
  */
 @Composable
 private fun HexagramScreenLayout(
@@ -328,33 +328,26 @@ private fun HexagramScreenLayout(
         )
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        // Card always centered, identical position in Drawing and Loaded.
-        Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center,
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp, vertical = 32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(20.dp),
         ) {
             HexagramCardColumn(
                 hexagram = hexagram,
                 reveal = reveal,
                 onClick = if (bottomBarVisible) onDraw else null,
             )
-        }
-
-        // Action row pinned to the bottom. Slides up from below the
-        // screen edge once the draw animation has settled; the card
-        // above is unaffected by its presence.
-        Column(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .padding(horizontal = 24.dp)
-                .padding(bottom = 24.dp),
-        ) {
             AnimatedVisibility(
                 visible = bottomBarVisible,
-                enter = slideInVertically(animationSpec = tween(220)) { it } +
-                    fadeIn(animationSpec = tween(220)),
+                enter = slideInVertically(animationSpec = tween(180)) { it } +
+                    fadeIn(animationSpec = tween(180)),
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -423,11 +416,11 @@ private fun LoadedView(
 ) {
     var showBottomBar by remember(fadeKey) { mutableStateOf(false) }
 
-    // Brief pause so the card's last fade-in lands first; then
-    // slide the action row in. Kept short — the user already saw
-    // ~3 s of reveal animation and shouldn't wait again.
+    // No delay — buttons fade in the same instant the ViewModel
+    // hands us the Loaded state, i.e. right after the draw
+    // animation finishes. The 180 ms tween on AnimatedVisibility
+    // handles the easing.
     LaunchedEffect(fadeKey) {
-        delay(40L)
         showBottomBar = true
     }
 
