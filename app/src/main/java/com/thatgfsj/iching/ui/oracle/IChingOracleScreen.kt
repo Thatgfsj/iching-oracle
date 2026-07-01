@@ -177,6 +177,35 @@ private fun HomePage(
                 )
             }
         }
+
+        // Bottom-anchored developer / repo footer. Static, no link.
+        HomeFooter(modifier = Modifier.align(Alignment.BottomCenter))
+    }
+}
+
+private const val REPO_NAME: String = "iching-oracle"
+
+@Composable
+private fun HomeFooter(modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(bottom = 16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Text(
+            text = "开发者：Thatgfsj",
+            fontFamily = FontFamily.SansSerif,
+            fontSize = 10.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
+        )
+        Text(
+            text = "仓库：$REPO_NAME",
+            fontFamily = FontFamily.Monospace,
+            fontSize = 10.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
+        )
     }
 }
 
@@ -626,6 +655,12 @@ private fun AskAiDialog(
  * Divination tradition discourages re-rolling the same question;
  * this asks the user to confirm the new draw is for a different
  * question.
+ *
+ * Button layout per user request: 继续抽取 on the left, 取消 on the
+ * right. The Material 3 AlertDialog renders `dismissButton` on the
+ * left and `confirmButton` on the right, so the labels are placed
+ * in those slots accordingly (semantically inverted from the usual
+ * confirm/cancel mapping).
  */
 @Composable
 private fun RedrawConfirmDialog(
@@ -648,13 +683,15 @@ private fun RedrawConfirmDialog(
             )
         },
         confirmButton = {
-            TextButton(onClick = onConfirm) {
-                Text("是的话就继续抽", fontFamily = FontFamily.Serif)
+            // Right-side slot: 取消.
+            TextButton(onClick = onCancel) {
+                Text("取消", fontFamily = FontFamily.Serif)
             }
         },
         dismissButton = {
-            TextButton(onClick = onCancel) {
-                Text("是，取消", fontFamily = FontFamily.Serif)
+            // Left-side slot: 继续抽取.
+            TextButton(onClick = onConfirm) {
+                Text("继续抽取", fontFamily = FontFamily.Serif)
             }
         },
     )
